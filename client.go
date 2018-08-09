@@ -2,7 +2,6 @@ package cas
 
 import (
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -36,8 +35,12 @@ func sanitisedURLString(unclean *url.URL) string {
 	return sanitisedURL(unclean).String()
 }
 
-// requestURL determines an absolute URL from the http.Request.
-func requestURL(r *http.Request) (*url.URL, error) {
+// serviceURL determines an absolute URL from the http.Request.
+func (c *Client) serviceURL(r *http.Request) (*url.URL, error) {
+	if c.ServiceURL != nil {
+		return c.ServiceURL, nil
+	}
+
 	u, err := url.Parse(r.URL.String())
 	if err != nil {
 		return nil, err
@@ -56,11 +59,15 @@ func requestURL(r *http.Request) (*url.URL, error) {
 }
 
 type Client struct {
-	URL *url.URL
+	URL        *url.URL
+	ServiceURL *url.URL
 }
 
 func (c *Client) AuthenticateUser(username, password string, r *http.Request) (*AuthenticationResponse, error) {
-	lt, et, jsession := c.getLoginToken(r)
+	lt, et, jsession, err := c.getLoginToken(r)
+	if err != nil {
+		return nil, err
+	}
 	if lt == "" {
 		return nil, errors.New("Couldn't get a login token")
 	}
@@ -73,7 +80,9 @@ func (c *Client) AuthenticateUser(username, password string, r *http.Request) (*
 	form.Add("password", password)
 	form.Add("lt", lt)
 	form.Add("_eventId", "submit") // Not sure why this is needed, it's not in the spec
-	form.Add("execution", et)
+	if et != "" {
+		form.Add("execution", et)
+	}
 
 	client := &http.Client{}
 	// Force the client to never follow redirects
@@ -123,12 +132,11 @@ func (c *Client) validateTicket(ticket string, r *http.Request) (*Authentication
 	return ParseServiceResponse(body)
 }
 
-func (c *Client) getLoginToken(r *http.Request) (string, string, *http.Cookie) {
+func (c *Client) getLoginToken(r *http.Request) (string, string, *http.Cookie, error) {
 	reqUrl, _ := c.loginUrlForRequestor(r)
 	resp, err := http.Get(reqUrl)
 	if err != nil {
-		fmt.Println(err.Error())
-		return "", "", nil
+		return "", "", nil, err
 	}
 
 	var jsession *http.Cookie
@@ -153,7 +161,7 @@ tokenLoop:
 		switch {
 		case tt == html.ErrorToken:
 			// End of the document, we're done
-			return "", "", nil
+			break tokenLoop
 		case tt == html.SelfClosingTagToken:
 			t := z.Token()
 
@@ -186,7 +194,7 @@ tokenLoop:
 			}
 		}
 	}
-	return loginToken, executionToken, jsession
+	return loginToken, executionToken, jsession, nil
 }
 
 func (c *Client) loginUrlForRequestor(r *http.Request) (string, error) {
@@ -195,7 +203,7 @@ func (c *Client) loginUrlForRequestor(r *http.Request) (string, error) {
 		return "", err
 	}
 
-	service, err := requestURL(r)
+	service, err := c.serviceURL(r)
 	if err != nil {
 		return "", err
 	}
@@ -213,7 +221,7 @@ func (c *Client) validateUrlForRequest(ticket string, r *http.Request) (string, 
 		return "", err
 	}
 
-	service, err := requestURL(r)
+	service, err := c.serviceURL(r)
 	if err != nil {
 		return "", err
 	}
@@ -232,7 +240,7 @@ func (c *Client) serviceValidateUrlForRequest(ticket string, r *http.Request) (s
 		return "", err
 	}
 
-	service, err := requestURL(r)
+	service, err := c.serviceURL(r)
 	if err != nil {
 		return "", err
 	}
