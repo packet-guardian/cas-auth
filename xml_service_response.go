@@ -3,7 +3,6 @@ package cas
 import (
 	"encoding/xml"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -65,7 +64,6 @@ func (t *fixedTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	}
 
 	timeStr := strings.SplitN(string(charData), "[", 2)[0]
-	fmt.Println(timeStr)
 	timeD, err := time.Parse(time.RFC3339, timeStr)
 	if err != nil {
 		return err
